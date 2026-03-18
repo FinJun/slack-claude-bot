@@ -121,9 +121,18 @@ export function registerClaudeCommand(app: App, sessionManager: SessionManager):
             break;
           }
           await respond(ephemeral('⏳ Claude 로그인을 시작합니다…'));
-          // Use respond() directly — user is already in DM, no need for conversations.open
+          // Try respond() first, fall back to conversations.open + postMessage
           const sendReply = async (text: string): Promise<void> => {
-            await respond({ response_type: 'ephemeral', text, replace_original: false });
+            try {
+              await respond({ response_type: 'ephemeral', text, replace_original: false });
+            } catch {
+              // Fallback: open DM channel directly
+              const dm = await client.conversations.open({ users: userId });
+              const dmChannelId = (dm.channel as Record<string, unknown>)?.id as string | undefined;
+              if (dmChannelId) {
+                await client.chat.postMessage({ channel: dmChannelId, text });
+              }
+            }
           };
           const loginMsg = await handleLogin(userId, isDM, sendReply);
           await sendReply(loginMsg);

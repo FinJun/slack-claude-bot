@@ -104,13 +104,15 @@ export async function handleLogin(
           urlSent = true;
           const url = match[0];
           logger.info('Captured login URL', { slackUserId, url: url.substring(0, 50) + '...' });
-          sendDM(
-            `🔗 아래 링크를 브라우저에서 열어 Claude 계정으로 로그인하세요:\n${url}`,
-          ).then(() => {
-            logger.info('Login URL sent via DM', { slackUserId });
-          }).catch((err) => {
-            logger.error('Failed to send login URL via DM', { slackUserId, err: String(err) });
-          });
+          // Await the send — do NOT fire-and-forget
+          (async () => {
+            try {
+              await sendDM(`🔗 아래 링크를 브라우저에서 열어 Claude 계정으로 로그인하세요:\n${url}`);
+              logger.info('Login URL sent', { slackUserId });
+            } catch (err) {
+              logger.error('Failed to send login URL', { slackUserId, err: String(err) });
+            }
+          })();
         }
       }
     };

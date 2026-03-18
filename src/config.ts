@@ -1,8 +1,36 @@
 import { z } from 'zod';
 import * as dotenv from 'dotenv';
 import { randomBytes } from 'crypto';
+import { existsSync, appendFileSync } from 'fs';
+import { resolve } from 'path';
 
 dotenv.config();
+
+/**
+ * Generate a stable ENCRYPTION_KEY and persist it to .env so it survives restarts.
+ * Without this, encrypted API keys become unreadable after a bot restart.
+ */
+function getOrCreateEncryptionKey(): string {
+  const existing = process.env.ENCRYPTION_KEY;
+  if (existing && existing.length >= 64) return existing;
+
+  const newKey = randomBytes(32).toString('hex');
+  const envPath = resolve(process.cwd(), '.env');
+
+  try {
+    if (existsSync(envPath)) {
+      appendFileSync(envPath, `\nENCRYPTION_KEY=${newKey}\n`);
+    } else {
+      appendFileSync(envPath, `ENCRYPTION_KEY=${newKey}\n`);
+    }
+    process.env.ENCRYPTION_KEY = newKey;
+    console.log('[config] Generated and saved ENCRYPTION_KEY to .env');
+  } catch {
+    console.warn('[config] Could not save ENCRYPTION_KEY to .env — using ephemeral key');
+  }
+
+  return newKey;
+}
 
 const envSchema = z.object({
   // Slack
@@ -10,11 +38,11 @@ const envSchema = z.object({
   SLACK_SIGNING_SECRET: z.string().min(1, 'SLACK_SIGNING_SECRET is required'),
   SLACK_APP_TOKEN: z.string().min(1, 'SLACK_APP_TOKEN is required'),
 
-  // Encryption (AES-256-GCM key as 64-char hex; auto-generated if not set)
+  // Encryption (AES-256-GCM key as 64-char hex; auto-generated and saved to .env if not set)
   ENCRYPTION_KEY: z
     .string()
     .optional()
-    .transform((val) => (val && val.length > 0 ? val : randomBytes(32).toString('hex'))),
+    .transform(() => getOrCreateEncryptionKey()),
 
   // Anthropic (optional — if empty, uses existing `claude login` session)
   ANTHROPIC_API_KEY: z.string().optional().default(''),
