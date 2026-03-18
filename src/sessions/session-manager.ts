@@ -73,18 +73,27 @@ export class SessionManager {
       apiKey = config.ANTHROPIC_API_KEY;
     }
 
-    // Resolve per-user HOME for Claude subscription auth (if no API key)
+    // Resolve per-user environment for Claude auth (priority: API key > config_dir > os_username)
     let sessionEnv: Record<string, string> | undefined;
     if (apiKey) {
       sessionEnv = { ANTHROPIC_API_KEY: apiKey };
     } else {
-      const osUsername = this.userStore.getOsUsername(params.userId);
-      if (osUsername) {
-        sessionEnv = { HOME: `/home/${osUsername}` };
-        logger.info('Using OS user HOME for Claude auth', {
+      const configDir = this.userStore.getConfigDir(params.userId);
+      if (configDir) {
+        sessionEnv = { CLAUDE_CONFIG_DIR: configDir };
+        logger.info('Using per-user CLAUDE_CONFIG_DIR for Claude auth', {
           userId: params.userId,
-          osUsername,
+          configDir,
         });
+      } else {
+        const osUsername = this.userStore.getOsUsername(params.userId);
+        if (osUsername) {
+          sessionEnv = { HOME: `/home/${osUsername}` };
+          logger.info('Using OS user HOME for Claude auth', {
+            userId: params.userId,
+            osUsername,
+          });
+        }
       }
     }
 

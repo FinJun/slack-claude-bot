@@ -83,4 +83,42 @@ export class UserStore {
     );
     return result.length > 0 && result[0].values.length > 0;
   }
+
+  saveConfigDir(slackUserId: string, configDir: string): void {
+    this.db.run(
+      `INSERT INTO users (slack_user_id, config_dir, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT(slack_user_id) DO UPDATE SET
+         config_dir = excluded.config_dir,
+         updated_at = datetime('now')`,
+      [slackUserId, configDir],
+    );
+    persistDb(this.db);
+  }
+
+  getConfigDir(slackUserId: string): string | null {
+    const result = this.db.exec(
+      `SELECT config_dir FROM users WHERE slack_user_id = ?`,
+      [slackUserId],
+    );
+    if (!result.length || !result[0].values.length) return null;
+    const val = result[0].values[0][0];
+    return typeof val === 'string' ? val : null;
+  }
+
+  hasConfigDir(slackUserId: string): boolean {
+    const result = this.db.exec(
+      `SELECT 1 FROM users WHERE slack_user_id = ? AND config_dir IS NOT NULL`,
+      [slackUserId],
+    );
+    return result.length > 0 && result[0].values.length > 0;
+  }
+
+  deleteConfigDir(slackUserId: string): void {
+    this.db.run(
+      `UPDATE users SET config_dir = NULL, updated_at = datetime('now') WHERE slack_user_id = ?`,
+      [slackUserId],
+    );
+    persistDb(this.db);
+  }
 }

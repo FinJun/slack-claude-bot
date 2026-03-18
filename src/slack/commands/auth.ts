@@ -60,9 +60,10 @@ export async function handleWhoami(slackUserId: string): Promise<string> {
 
   const hasApiKey = store.hasApiKey(slackUserId);
   const osUsername = store.getOsUsername(slackUserId);
+  const configDir = store.getConfigDir(slackUserId);
 
-  if (!hasApiKey && !osUsername) {
-    return '❌ 미인증. `/claude register <os-username>` 또는 `/claude auth <api-key>`';
+  if (!hasApiKey && !osUsername && !configDir) {
+    return '❌ 미인증. `/claude login`, `/claude register <os-username>` 또는 `/claude auth <api-key>`';
   }
 
   const lines: string[] = [];
@@ -78,6 +79,10 @@ export async function handleWhoami(slackUserId: string): Promise<string> {
       const date = registeredAt.slice(0, 10);
       lines.push(`✅ API key 인증 (sk-ant-${hint}) | 등록일: ${date}`);
     }
+  }
+
+  if (configDir) {
+    lines.push(`✅ Claude 계정 로그인 완료 (\`/claude login\`) — Claude 구독 사용`);
   }
 
   if (osUsername) {

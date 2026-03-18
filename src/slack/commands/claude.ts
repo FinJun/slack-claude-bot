@@ -27,6 +27,7 @@ import {
 } from '../../utils/errors.js';
 import { SessionStatus } from '../../sessions/session-types.js';
 import { handleAuth, handleWhoami, handleRevoke, handleRegister } from './auth.js';
+import { handleLogin, handleLogout } from './login.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,13 @@ const HELP_TEXT = [
   '',
   '`/claude stop <session-id>`',
   '  Gracefully stop the given session.',
+  '',
+  '`/claude login`',
+  '  Authenticate your Claude account (DM only).',
+  '  Use this if you have a Claude Pro/Max subscription.',
+  '',
+  '`/claude logout`',
+  '  Remove stored Claude auth credentials (DM only).',
   '',
   '`/claude auth <api-key>`',
   '  Register your Anthropic API key (DM only).',
@@ -106,6 +114,32 @@ export function registerClaudeCommand(app: App, sessionManager: SessionManager):
         case 'stop':
           await handleStop({ args, userId, respond, sessionManager });
           break;
+
+        case 'login': {
+          if (!isDM) {
+            await respond(ephemeral('⚠️ 로그인은 DM에서만 할 수 있습니다.'));
+            break;
+          }
+          // Acknowledge immediately — login process will take time
+          await respond(ephemeral('⏳ Claude 로그인을 시작합니다. 잠시 후 인증 링크를 DM으로 보내드립니다…'));
+          // sendDM helper: open a DM channel and post a message
+          const sendDM = async (text: string): Promise<void> => {
+            const dm = await client.conversations.open({ users: userId });
+            const dmChannelId = (dm.channel as Record<string, unknown>)?.id as string | undefined;
+            if (dmChannelId) {
+              await client.chat.postMessage({ channel: dmChannelId, text });
+            }
+          };
+          const loginMsg = await handleLogin(userId, isDM, sendDM);
+          await sendDM(loginMsg);
+          break;
+        }
+
+        case 'logout': {
+          const logoutMsg = await handleLogout(userId, sessionManager);
+          await respond(ephemeral(logoutMsg));
+          break;
+        }
 
         case 'auth': {
           const apiKey = args[0] ?? '';
