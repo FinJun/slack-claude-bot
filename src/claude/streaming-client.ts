@@ -32,6 +32,8 @@ export interface StreamingSessionOptions {
   model?: string;
   /** Environment variables to pass to the Claude subprocess (e.g. per-user ANTHROPIC_API_KEY) */
   env?: Record<string, string>;
+  /** Append to the system prompt */
+  appendSystemPrompt?: string;
 }
 
 /**
@@ -49,6 +51,7 @@ export function createStreamingSession(opts: StreamingSessionOptions): Query {
     additionalDirectories: opts.additionalDirectories,
     model: opts.model,
     env: opts.env,
+    appendSystemPrompt: opts.appendSystemPrompt,
   };
 
   if (opts.resumeSessionId) {

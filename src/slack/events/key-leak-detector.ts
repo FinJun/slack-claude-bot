@@ -61,7 +61,7 @@ export function registerKeyLeakDetector(app: App, userStore: UserStore): void {
       if (dmChannel) {
         await client.chat.postMessage({
           channel: dmChannel,
-          text: '⚠️ API 키가 채널에 노출되었습니다! https://console.anthropic.com 에서 즉시 키를 재발급하세요.',
+          text: '⚠️ Your API key was exposed in a channel! Please rotate it immediately at https://console.anthropic.com.',
         });
         logger.info('Key leak warning DM sent', { userId });
       }

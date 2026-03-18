@@ -73,14 +73,41 @@ export class SessionManager {
       apiKey = config.ANTHROPIC_API_KEY;
     }
 
-    // Resolve per-user environment for Claude auth (priority: API key > config_dir > os_username)
+    // Resolve per-user OAuth token
+    let oauthToken: string | undefined;
+    try {
+      const oauthRow = this.userStore.getOAuthToken(params.userId);
+      if (oauthRow) {
+        oauthToken = decrypt(
+          {
+            encrypted: oauthRow.encrypted_oauth_token,
+            iv: oauthRow.oauth_token_iv,
+            authTag: oauthRow.oauth_token_auth_tag,
+          },
+          config.ENCRYPTION_KEY,
+        );
+      }
+    } catch (err) {
+      logger.warn('Failed to decrypt user OAuth token', {
+        userId: params.userId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Resolve per-user environment for Claude auth
+    // Priority: per-user OAuth token > per-user API key > config_dir > os_username
     let sessionEnv: Record<string, string> | undefined;
-    if (apiKey) {
-      sessionEnv = { ANTHROPIC_API_KEY: apiKey };
+    if (oauthToken) {
+      sessionEnv = { ...process.env as Record<string, string>, CLAUDE_CODE_OAUTH_TOKEN: oauthToken };
+      logger.info('Using per-user CLAUDE_CODE_OAUTH_TOKEN for Claude auth', {
+        userId: params.userId,
+      });
+    } else if (apiKey) {
+      sessionEnv = { ...process.env as Record<string, string>, ANTHROPIC_API_KEY: apiKey };
     } else {
       const configDir = this.userStore.getConfigDir(params.userId);
       if (configDir) {
-        sessionEnv = { CLAUDE_CONFIG_DIR: configDir };
+        sessionEnv = { ...process.env as Record<string, string>, CLAUDE_CONFIG_DIR: configDir };
         logger.info('Using per-user CLAUDE_CONFIG_DIR for Claude auth', {
           userId: params.userId,
           configDir,
@@ -88,7 +115,7 @@ export class SessionManager {
       } else {
         const osUsername = this.userStore.getOsUsername(params.userId);
         if (osUsername) {
-          sessionEnv = { HOME: `/home/${osUsername}` };
+          sessionEnv = { ...process.env as Record<string, string>, HOME: `/home/${osUsername}` };
           logger.info('Using OS user HOME for Claude auth', {
             userId: params.userId,
             osUsername,

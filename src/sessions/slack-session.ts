@@ -40,6 +40,8 @@ export interface SlackSessionOptions {
   resumeSdkSessionId?: string;
   /** Environment variables to inject into the Claude subprocess (e.g. ANTHROPIC_API_KEY or HOME) */
   env?: Record<string, string>;
+  /** Claude model override (e.g. 'claude-opus-4-6') */
+  model?: string;
 }
 
 export class SlackSession {
@@ -129,6 +131,8 @@ export class SlackSession {
       includePartialMessages: false,
       additionalDirectories: config.ALLOWED_DIRECTORIES,
       env: this.opts.env,
+      model: this.opts.model ?? 'claude-opus-4-6',
+      appendSystemPrompt: 'You are a helpful AI assistant running in a Slack workspace. You can answer general questions, have casual conversations, AND help with software engineering tasks. Do not refuse non-coding questions - be helpful for any topic the user asks about.',
     });
 
     this.loopPromise = this.runLoop();

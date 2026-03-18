@@ -20,7 +20,7 @@ Chat with Claude Code directly from Slack. A production-grade Slack bot that man
 
 - **Node.js** 18.0.0 or later
 - **Slack workspace** with admin permissions to create a custom app
-- **Anthropic API key** (or existing `claude login` session on the server)
+- **Authentication:** one of — Anthropic API key, Claude OAuth token (via `claude setup-token`), or existing `claude login` session on the server
 
 ## Quick Start
 
@@ -75,7 +75,7 @@ SLACK_BOT_TOKEN=xoxb-your-bot-token-here
 SLACK_SIGNING_SECRET=your-signing-secret-here
 SLACK_APP_TOKEN=xapp-your-app-token-here
 
-# Anthropic API (optional — if empty, uses "claude login" session)
+# Anthropic API (optional — if empty, uses per-user OAuth token or "claude login" session)
 ANTHROPIC_API_KEY=sk-ant-your-api-key
 
 # Session Configuration
@@ -160,15 +160,46 @@ Gracefully stop a session.
 /claude stop abc-123-def
 ```
 
+#### `/claude token <token>`
+
+Register your Claude OAuth token (DM only). This is the recommended way to authenticate if you have a Claude Pro/Max subscription.
+
+1. On your own machine, run:
+   ```
+   claude setup-token
+   ```
+2. Copy the printed token, then in a Slack DM with the bot:
+   ```
+   /claude token sk-ant-xxxxxxxxxxxxxxx
+   ```
+
+**Note:** This command only works in DMs for security. The token is encrypted and stored server-side.
+
+#### `/claude login`
+
+Shows instructions for the token-based authentication flow. Running this command does **not** start an OAuth flow — it prints guidance on how to use `/claude token`.
+
+```
+/claude login
+```
+
+#### `/claude logout`
+
+Delete your stored Claude credentials (OAuth token or legacy config) and stop all active sessions.
+
+```
+/claude logout
+```
+
 #### `/claude auth <api-key>`
 
-Register your personal Anthropic API key (DM only).
+Register your personal Anthropic API key (DM only). Use this if you have a direct Anthropic API key rather than a Claude subscription.
 
 ```
 /claude auth sk-ant-xxxxxxxxxxxxxxx
 ```
 
-**Note:** This command only works in DMs for security. If a server-level key is configured, it's used as a fallback, but your personal key takes priority.
+**Note:** This command only works in DMs for security. If a server-level key is configured, it is used as a fallback, but your personal key takes priority.
 
 #### `/claude whoami`
 
@@ -180,7 +211,8 @@ Show your authentication status and key registration date.
 
 Returns:
 ```
-✅ 認証済み (sk-ant-...xxxx) | 登録日: 2026-03-18
+✅ Claude OAuth token registered (/claude token) — uses Claude subscription
+✅ Authenticated with API key (sk-ant-...xxxx) | registered: 2026-03-18
 ```
 
 #### `/claude revoke`
@@ -303,12 +335,15 @@ slack-claude-bot/
 
 ## Security Model
 
-### API Key Management
+### Authentication & API Key Management
 
-- **Per-User Keys:** Users register their own keys via `/claude auth` (DM only), encrypted with AES-256-GCM
-- **Server-Level Key:** Optional fallback via `ANTHROPIC_API_KEY` environment variable
-- **Default:** If neither is available, Claude CLI session (`claude login`) is used
-- **Leak Detection:** Automatic detection of `sk-ant-*` patterns in Slack messages with message deletion and key revocation
+Authentication is resolved in priority order:
+
+1. **OAuth Token (recommended):** Users run `claude setup-token` on their own machine, then register the token via `/claude token <token>` in a DM. Token is encrypted with AES-256-GCM.
+2. **Per-User API Key:** Users register their Anthropic API key directly via `/claude auth <api-key>` (DM only), also encrypted with AES-256-GCM.
+3. **OS Account (legacy):** Users link their Slack account to a server OS username via `/claude register <os-username>`, which uses an existing `claude login` session in that user's home directory.
+4. **Server-Level Key:** Optional fallback via `ANTHROPIC_API_KEY` environment variable.
+- **Leak Detection:** Automatic detection of `sk-ant-*` patterns in Slack messages with message deletion and key revocation.
 
 ### Tool Policy
 

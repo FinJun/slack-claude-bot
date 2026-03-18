@@ -17,7 +17,6 @@ import { SessionManager } from '../types.js';
 import { logger } from '../../utils/logger.js';
 import { globalRateLimiter } from '../rate-limiter.js';
 import { RateLimitError } from '../../utils/errors.js';
-
 export function registerMessageHandler(app: App, sessionManager: SessionManager): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.event('message', async ({ event, client }) => {
@@ -28,12 +27,14 @@ export function registerMessageHandler(app: App, sessionManager: SessionManager)
     if (msg.bot_id || msg.subtype === 'bot_message') return;
     if (msg.subtype === 'message_deleted' || msg.subtype === 'message_changed') return;
 
-    // Only handle thread messages
+    const userId: string = msg.user;
+    const text: string | undefined = msg.text;
     const threadTs: string | undefined = msg.thread_ts;
+
+    // Only handle thread messages from here
     if (!threadTs) return;
 
     const channelId: string = msg.channel;
-    const text: string | undefined = msg.text;
 
     if (!text?.trim()) return;
 

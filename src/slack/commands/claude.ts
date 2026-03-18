@@ -27,7 +27,7 @@ import {
 } from '../../utils/errors.js';
 import { SessionStatus } from '../../sessions/session-types.js';
 import { handleAuth, handleWhoami, handleRevoke, handleRegister } from './auth.js';
-import { handleLogin, handleLogout } from './login.js';
+import { handleToken, handleLogout } from './login.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -58,12 +58,12 @@ const HELP_TEXT = [
   '`/claude stop <session-id>`',
   '  Gracefully stop the given session.',
   '',
-  '`/claude login`',
-  '  Authenticate your Claude account (DM only).',
-  '  Use this if you have a Claude Pro/Max subscription.',
+  '`/claude token <token>`',
+  '  Register your Claude OAuth token (DM only).',
+  '  Run `claude setup-token` on your own machine to obtain a token.',
   '',
   '`/claude logout`',
-  '  Remove stored Claude auth credentials (DM only).',
+  '  Delete your stored Claude credentials (DM only).',
   '',
   '`/claude auth <api-key>`',
   '  Register your Anthropic API key (DM only).',
@@ -116,26 +116,24 @@ export function registerClaudeCommand(app: App, sessionManager: SessionManager):
           break;
 
         case 'login': {
+          await respond(ephemeral(
+            'Run `claude setup-token` on your own machine or terminal to obtain a token, then register it with `/claude token <token>`.',
+          ));
+          break;
+        }
+
+        case 'token': {
           if (!isDM) {
-            await respond(ephemeral('⚠️ 로그인은 DM에서만 할 수 있습니다.'));
+            await respond(ephemeral('⚠️ Token registration is only allowed in DMs.'));
             break;
           }
-          await respond(ephemeral('⏳ Claude 로그인을 시작합니다…'));
-          // Try respond() first, fall back to conversations.open + postMessage
-          const sendReply = async (text: string): Promise<void> => {
-            try {
-              await respond({ response_type: 'ephemeral', text, replace_original: false });
-            } catch {
-              // Fallback: open DM channel directly
-              const dm = await client.conversations.open({ users: userId });
-              const dmChannelId = (dm.channel as Record<string, unknown>)?.id as string | undefined;
-              if (dmChannelId) {
-                await client.chat.postMessage({ channel: dmChannelId, text });
-              }
-            }
-          };
-          const loginMsg = await handleLogin(userId, isDM, sendReply);
-          await sendReply(loginMsg);
+          const token = args.join('').trim();
+          if (!token) {
+            await respond(ephemeral('Usage: `/claude token <token>`'));
+            break;
+          }
+          const tokenMsg = await handleToken(userId, token, isDM);
+          await respond(ephemeral(tokenMsg));
           break;
         }
 

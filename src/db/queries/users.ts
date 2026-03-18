@@ -8,6 +8,12 @@ export interface UserApiKeyRow {
   key_auth_tag: string;
 }
 
+export interface UserOAuthTokenRow {
+  encrypted_oauth_token: string;
+  oauth_token_iv: string;
+  oauth_token_auth_tag: string;
+}
+
 export class UserStore {
   constructor(private db: Database) {}
 
@@ -117,6 +123,51 @@ export class UserStore {
   deleteConfigDir(slackUserId: string): void {
     this.db.run(
       `UPDATE users SET config_dir = NULL, updated_at = datetime('now') WHERE slack_user_id = ?`,
+      [slackUserId],
+    );
+    persistDb(this.db);
+  }
+
+  saveOAuthToken(slackUserId: string, encryptedData: EncryptedData): void {
+    this.db.run(
+      `INSERT INTO users (slack_user_id, encrypted_oauth_token, oauth_token_iv, oauth_token_auth_tag, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(slack_user_id) DO UPDATE SET
+         encrypted_oauth_token = excluded.encrypted_oauth_token,
+         oauth_token_iv = excluded.oauth_token_iv,
+         oauth_token_auth_tag = excluded.oauth_token_auth_tag,
+         updated_at = datetime('now')`,
+      [slackUserId, encryptedData.encrypted, encryptedData.iv, encryptedData.authTag],
+    );
+    persistDb(this.db);
+  }
+
+  getOAuthToken(slackUserId: string): UserOAuthTokenRow | null {
+    const result = this.db.exec(
+      `SELECT encrypted_oauth_token, oauth_token_iv, oauth_token_auth_tag FROM users WHERE slack_user_id = ?`,
+      [slackUserId],
+    );
+    if (!result.length || !result[0].values.length) return null;
+    const row = result[0].values[0];
+    if (!row[0]) return null;
+    return {
+      encrypted_oauth_token: row[0] as string,
+      oauth_token_iv: row[1] as string,
+      oauth_token_auth_tag: row[2] as string,
+    };
+  }
+
+  hasOAuthToken(slackUserId: string): boolean {
+    const result = this.db.exec(
+      `SELECT 1 FROM users WHERE slack_user_id = ? AND encrypted_oauth_token IS NOT NULL`,
+      [slackUserId],
+    );
+    return result.length > 0 && result[0].values.length > 0;
+  }
+
+  deleteOAuthToken(slackUserId: string): void {
+    this.db.run(
+      `UPDATE users SET encrypted_oauth_token = NULL, oauth_token_iv = NULL, oauth_token_auth_tag = NULL, updated_at = datetime('now') WHERE slack_user_id = ?`,
       [slackUserId],
     );
     persistDb(this.db);

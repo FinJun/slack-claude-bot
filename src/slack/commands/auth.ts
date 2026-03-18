@@ -33,15 +33,15 @@ export async function handleAuth(
   isDM: boolean,
 ): Promise<string> {
   if (!isDM) {
-    return '⚠️ API 키는 DM에서만 등록할 수 있습니다.';
+    return '⚠️ API key registration is only allowed in DMs.';
   }
 
   if (!apiKey) {
-    return '사용법: `/claude auth <api-key>`';
+    return 'Usage: `/claude auth <api-key>`';
   }
 
   if (!apiKey.startsWith('sk-ant-')) {
-    return '❌ 올바르지 않은 API 키 형식입니다. Anthropic API 키는 `sk-ant-` 로 시작해야 합니다.';
+    return '❌ Invalid API key format. Anthropic API keys must start with `sk-ant-`.';
   }
 
   const encryptedData = encrypt(apiKey, config.ENCRYPTION_KEY);
@@ -49,7 +49,7 @@ export async function handleAuth(
 
   getUserStore().saveApiKey(slackUserId, encryptedData, hint);
 
-  return `✅ API 키가 등록되었습니다 (hint: ${hint})`;
+  return `✅ API key registered (hint: ${hint})`;
 }
 
 /**
@@ -59,14 +59,19 @@ export async function handleWhoami(slackUserId: string): Promise<string> {
   const store = getUserStore();
 
   const hasApiKey = store.hasApiKey(slackUserId);
+  const hasOAuthToken = store.hasOAuthToken(slackUserId);
   const osUsername = store.getOsUsername(slackUserId);
   const configDir = store.getConfigDir(slackUserId);
 
-  if (!hasApiKey && !osUsername && !configDir) {
-    return '❌ 미인증. `/claude login`, `/claude register <os-username>` 또는 `/claude auth <api-key>`';
+  if (!hasApiKey && !hasOAuthToken && !osUsername && !configDir) {
+    return '❌ Not authenticated. Use `/claude token <token>`, `/claude register <os-username>`, or `/claude auth <api-key>`';
   }
 
   const lines: string[] = [];
+
+  if (hasOAuthToken) {
+    lines.push(`✅ Claude OAuth token registered (\`/claude token\`) — uses Claude subscription`);
+  }
 
   if (hasApiKey) {
     const db = getDatabase();
@@ -77,16 +82,16 @@ export async function handleWhoami(slackUserId: string): Promise<string> {
     if (result.length && result[0].values.length) {
       const [hint, registeredAt] = result[0].values[0] as [string, string];
       const date = registeredAt.slice(0, 10);
-      lines.push(`✅ API key 인증 (sk-ant-${hint}) | 등록일: ${date}`);
+      lines.push(`✅ Authenticated with API key (sk-ant-${hint}) | registered: ${date}`);
     }
   }
 
   if (configDir) {
-    lines.push(`✅ Claude 계정 로그인 완료 (\`/claude login\`) — Claude 구독 사용`);
+    lines.push(`✅ Claude account login (legacy) — uses Claude subscription`);
   }
 
   if (osUsername) {
-    lines.push(`✅ OS 계정 연동 (\`${osUsername}\`) — Claude 구독 사용`);
+    lines.push(`✅ Linked to OS account (\`${osUsername}\`) — uses Claude subscription`);
   }
 
   return lines.join('\n');
@@ -102,16 +107,16 @@ export async function handleRegister(
   isDM: boolean,
 ): Promise<string> {
   if (!isDM) {
-    return '⚠️ OS 계정 등록은 DM에서만 할 수 있습니다.';
+    return '⚠️ OS account registration is only allowed in DMs.';
   }
 
   if (!osUsername) {
-    return '사용법: `/claude register <os-username>`';
+    return 'Usage: `/claude register <os-username>`';
   }
 
   // Validate: only alphanumeric + underscore, no path traversal
   if (!/^[a-zA-Z0-9_]+$/.test(osUsername)) {
-    return '❌ OS 사용자명은 영문자, 숫자, 밑줄(_)만 사용할 수 있습니다.';
+    return '❌ OS username may only contain letters, digits, and underscores (_).';
   }
 
   const homeDir = `/home/${osUsername}`;
@@ -119,24 +124,24 @@ export async function handleRegister(
 
   // Check home directory exists
   if (!existsSync(homeDir)) {
-    return `❌ 홈 디렉터리가 존재하지 않습니다: \`${homeDir}\``;
+    return `❌ Home directory does not exist: \`${homeDir}\``;
   }
 
   // Check .claude directory exists (user has run claude login)
   if (!existsSync(claudeDir)) {
-    return `❌ \`${claudeDir}\` 디렉터리가 없습니다. 서버에서 \`claude login\`을 먼저 실행하세요.`;
+    return `❌ \`${claudeDir}\` directory not found. Please run \`claude login\` on the server first.`;
   }
 
   // Check .claude directory is readable by the bot process
   try {
     accessSync(claudeDir, constants.R_OK);
   } catch {
-    return `❌ \`${claudeDir}\` 디렉터리에 접근 권한이 없습니다.`;
+    return `❌ No read access to \`${claudeDir}\`.`;
   }
 
   getUserStore().saveOsUsername(slackUserId, osUsername);
 
-  return `✅ OS 계정 \`${osUsername}\`으로 등록되었습니다. Claude 로그인 세션이 사용됩니다.`;
+  return `✅ Registered with OS account \`${osUsername}\`. Claude login session will be used.`;
 }
 
 /**
@@ -150,7 +155,7 @@ export async function handleRevoke(
   const store = getUserStore();
 
   if (!store.hasApiKey(slackUserId)) {
-    return '❌ 등록된 API 키가 없습니다.';
+    return '❌ No API key registered.';
   }
 
   // Stop all active sessions for this user
@@ -165,5 +170,5 @@ export async function handleRevoke(
 
   store.deleteApiKey(slackUserId);
 
-  return '🗑️ API 키가 삭제되었습니다.';
+  return '🗑️ API key deleted.';
 }
