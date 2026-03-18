@@ -15,6 +15,7 @@ export interface Session {
   created_at: string;
   updated_at: string;
   last_activity_at: string;
+  server_name: string;
 }
 
 export interface CreateSessionParams {
@@ -24,6 +25,7 @@ export interface CreateSessionParams {
   slack_user_id: string;
   project_dir: string;
   subprocess_pid?: number;
+  server_name?: string;
 }
 
 export interface UpdateSessionParams {
@@ -47,6 +49,7 @@ function rowToSession(row: unknown[]): Session {
     created_at: row[9] as string,
     updated_at: row[10] as string,
     last_activity_at: row[11] as string,
+    server_name: (row[12] as string | null) ?? 'local',
   };
 }
 
@@ -55,8 +58,8 @@ export class SessionStore {
     const db = getDatabase();
     db.run(
       `INSERT INTO sessions
-         (id, slack_thread_ts, slack_channel_id, slack_user_id, project_dir, subprocess_pid)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (id, slack_thread_ts, slack_channel_id, slack_user_id, project_dir, subprocess_pid, server_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         params.id,
         params.slack_thread_ts,
@@ -64,6 +67,7 @@ export class SessionStore {
         params.slack_user_id,
         params.project_dir,
         params.subprocess_pid ?? null,
+        params.server_name ?? 'local',
       ],
     );
 
@@ -83,7 +87,7 @@ export class SessionStore {
     const result = db.exec(
       `SELECT id, slack_thread_ts, slack_channel_id, slack_user_id, project_dir,
               status, total_cost_usd, num_turns, subprocess_pid,
-              created_at, updated_at, last_activity_at
+              created_at, updated_at, last_activity_at, server_name
        FROM sessions WHERE id = ?`,
       [id],
     );
@@ -96,7 +100,7 @@ export class SessionStore {
     const result = db.exec(
       `SELECT s.id, s.slack_thread_ts, s.slack_channel_id, s.slack_user_id, s.project_dir,
               s.status, s.total_cost_usd, s.num_turns, s.subprocess_pid,
-              s.created_at, s.updated_at, s.last_activity_at
+              s.created_at, s.updated_at, s.last_activity_at, s.server_name
        FROM sessions s
        JOIN thread_session_map t ON t.session_id = s.id
        WHERE t.slack_channel_id = ? AND t.slack_thread_ts = ?`,
@@ -140,7 +144,7 @@ export class SessionStore {
     const db = getDatabase();
     let sql = `SELECT id, slack_thread_ts, slack_channel_id, slack_user_id, project_dir,
                       status, total_cost_usd, num_turns, subprocess_pid,
-                      created_at, updated_at, last_activity_at
+                      created_at, updated_at, last_activity_at, server_name
                FROM sessions`;
     const params: unknown[] = [];
 
@@ -168,7 +172,7 @@ export class SessionStore {
     const result = db.exec(
       `SELECT id, slack_thread_ts, slack_channel_id, slack_user_id, project_dir,
               status, total_cost_usd, num_turns, subprocess_pid,
-              created_at, updated_at, last_activity_at
+              created_at, updated_at, last_activity_at, server_name
        FROM sessions
        WHERE slack_user_id = ?
        ORDER BY created_at DESC`,

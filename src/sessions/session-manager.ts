@@ -18,14 +18,18 @@ import {
   SessionNotFoundError,
   SessionLimitExceededError,
 } from '../utils/errors.js';
+import type { ClaudeTransport } from '../ssh/types.js';
+import { SshTransport } from '../ssh/ssh-transport.js';
+import { getServerRegistry } from '../servers/server-registry.js';
 
 export interface CreateSessionParams {
   userId: string;
   channelId: string;
   threadTs: string;
   projectDir: string;
+  serverName?: string;
   onMessage: SlackSessionOptions['onMessage'];
-  onEnd?: SlackSessionOptions['onEnd'];
+  onEnd?: (sessionId: string, reason: 'stop' | 'error' | 'timeout', errorMessage?: string) => void;
 }
 
 export class SessionManager {
@@ -124,15 +128,61 @@ export class SessionManager {
       }
     }
 
+    // Build SSH transport for remote servers
+    let transport: ClaudeTransport | undefined;
+
+    if (params.serverName) {
+      const registry = getServerRegistry();
+      const server = registry.resolve(params.serverName);
+
+      if (server && !registry.isLocal(params.serverName)) {
+        const mapping = this.userStore.getServerMapping(params.userId, params.serverName);
+        if (!mapping) {
+          throw new Error(`No SSH credentials registered for server ${params.serverName}`);
+        }
+
+        const sshKeyPath = config.SSH_KEY_PATH || undefined;
+
+        // Check sshpass availability when password auth is needed
+        if (!sshKeyPath && !SshTransport.checkSshpassAvailable()) {
+          throw new Error(
+            'sshpass is not installed on this server. Install it with `apt-get install sshpass` or `brew install sshpass`, or configure an SSH key.',
+          );
+        }
+
+        transport = new SshTransport({
+          host: server.host,
+          port: server.port,
+          username: mapping.osUsername,
+          password: mapping.password,
+          oauthToken: oauthToken ?? '',
+          cwd: params.projectDir,
+          maxTurns: config.MAX_TURNS,
+          model: 'claude-opus-4-6',
+          appendSystemPrompt:
+            'You are a helpful AI assistant running in a Slack workspace. You can answer general questions, have casual conversations, AND help with software engineering tasks. Do not refuse non-coding questions - be helpful for any topic the user asks about.',
+          sshKeyPath,
+        });
+
+        logger.info('Using SSH transport for remote session', {
+          userId: params.userId,
+          serverName: params.serverName,
+          host: server.host,
+        });
+      }
+    }
+
     const session = new SlackSession({
       userId: params.userId,
       channelId: params.channelId,
       threadTs: params.threadTs,
       projectDir: params.projectDir,
+      serverName: params.serverName,
       onMessage: params.onMessage,
       env: sessionEnv,
-      onEnd: (sessionId, reason) => {
-        params.onEnd?.(sessionId, reason);
+      transport,
+      onEnd: (sessionId, reason, errorMessage) => {
+        params.onEnd?.(sessionId, reason, errorMessage);
         this.handleSessionEnd(sessionId, reason);
       },
     });
@@ -144,6 +194,7 @@ export class SessionManager {
       slack_channel_id: params.channelId,
       slack_user_id: params.userId,
       project_dir: params.projectDir,
+      server_name: params.serverName,
     });
 
     this.sessions.set(session.id, session);

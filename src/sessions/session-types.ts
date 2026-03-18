@@ -16,6 +16,7 @@ export interface SessionInfo {
   turnCount: number;
   totalCostUsd: number;
   workingDirectory: string;
+  serverName?: string;
 }
 
 export type SessionEventType =

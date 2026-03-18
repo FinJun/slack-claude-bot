@@ -9,6 +9,7 @@ import { encrypt } from '../../utils/crypto.js';
 import { UserStore } from '../../db/queries/users.js';
 import { getDatabase } from '../../db/database.js';
 import { config } from '../../config.js';
+import { getServerRegistry } from '../../servers/server-registry.js';
 import type { SessionManager } from '../types.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -171,4 +172,82 @@ export async function handleRevoke(
   store.deleteApiKey(slackUserId);
 
   return '🗑️ API key deleted.';
+}
+
+/**
+ * Handle `/claude register <server> <username> <password>`.
+ * Must be called from a DM (security — password in message).
+ */
+export async function handleServerRegister(
+  slackUserId: string,
+  serverName: string,
+  username: string,
+  password: string,
+  isDM: boolean,
+): Promise<string> {
+  if (!isDM) {
+    return '⚠️ Server registration is only allowed in DMs.';
+  }
+
+  const registry = getServerRegistry();
+  if (!registry.resolve(serverName)) {
+    const available = registry.list().map((s) => `\`${s.name}\``).join(', ');
+    return available
+      ? `❌ Unknown server \`${serverName}\`. Available servers: ${available}`
+      : `❌ Unknown server \`${serverName}\`. No servers are configured.`;
+  }
+
+  const encryptedData = encrypt(password, config.ENCRYPTION_KEY);
+  getUserStore().saveServerMapping(slackUserId, serverName, username, encryptedData);
+
+  return `✅ Registered for server \`${serverName}\` as \`${username}\`.`;
+}
+
+/**
+ * Handle `/claude servers`.
+ * Lists all configured servers and the user's registration status for each.
+ */
+export async function handleServerList(slackUserId: string): Promise<string> {
+  const registry = getServerRegistry();
+  const servers = registry.list();
+
+  if (servers.length === 0) {
+    return 'No servers are configured.';
+  }
+
+  const mappings = getUserStore().listServerMappings(slackUserId);
+  const registeredMap = new Map(mappings.map((m) => [m.serverName, m.osUsername]));
+
+  const lines = ['*Available servers:*'];
+  for (const server of servers) {
+    const isLocal = registry.isLocal(server.name);
+    const location = isLocal ? 'local' : `${server.host}:${server.port}`;
+    const osUsername = registeredMap.get(server.name);
+    const status = osUsername
+      ? `✅ registered as ${osUsername}`
+      : '❌ not registered';
+    lines.push(`• \`${server.name}\` (${location}) — ${status}`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Handle `/claude unregister <server>`.
+ * Removes the user's server mapping.
+ */
+export async function handleServerUnregister(
+  slackUserId: string,
+  serverName: string,
+): Promise<string> {
+  if (!serverName) {
+    return 'Usage: `/claude unregister <server>`';
+  }
+
+  const deleted = getUserStore().deleteServerMapping(slackUserId, serverName);
+  if (!deleted) {
+    return `❌ Could not unregister from server \`${serverName}\`.`;
+  }
+
+  return `✅ Unregistered from server \`${serverName}\`.`;
 }

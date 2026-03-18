@@ -12,17 +12,23 @@
 
 import 'dotenv/config';
 import { config } from './config.js';
-import { initDatabase, closeDatabase, migration001, migration002, migration003, migration004, migration005 } from './db/index.js';
+import { initDatabase, closeDatabase, migration001, migration002, migration003, migration004, migration005, migration006, migration007 } from './db/index.js';
 import { UserStore } from './db/queries/users.js';
 import { SessionManager } from './sessions/index.js';
 import { createApp } from './app.js';
 import { logger } from './utils/logger.js';
+import { ServerRegistry } from './servers/server-registry.js';
 
 async function main(): Promise<void> {
   logger.info('Starting slack-claude-bot', { version: '0.1.0' });
 
+  // ── 0. Server registry ───────────────────────────────────────────────────
+  const serverRegistry = new ServerRegistry(config.SERVERS ?? '');
+  const servers = serverRegistry.list();
+  logger.info('ServerRegistry initialised', { serverCount: servers.length });
+
   // ── 1. Database ──────────────────────────────────────────────────────────
-  const db = await initDatabase([migration001, migration002, migration003, migration004, migration005]);
+  const db = await initDatabase([migration001, migration002, migration003, migration004, migration005, migration006, migration007]);
   logger.info('Database initialised');
 
   // ── 2. Session manager ───────────────────────────────────────────────────

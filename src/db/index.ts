@@ -5,6 +5,8 @@ export { migration002 } from './migrations/002-users.js';
 export { migration003 } from './migrations/003-users-os-username.js';
 export { migration004 } from './migrations/004-users-config-dir.js';
 export { migration005 } from './migrations/005-users-oauth-token.js';
+export { migration006 } from './migrations/006-user-server-mappings.js';
+export { migration007 } from './migrations/007-sessions-server.js';
 export { SessionStore } from './queries/sessions.js';
 export type { Session, CreateSessionParams, UpdateSessionParams, SessionStatus } from './queries/sessions.js';
 export { logToolUse, getRecentDenials, getAuditLogsForSession } from './queries/audit.js';

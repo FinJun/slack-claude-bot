@@ -2,13 +2,16 @@
  * /claude slash command handler.
  *
  * Subcommands:
- *   /claude start <project-dir> [description...]  — start a new session
- *   /claude list                                   — list active sessions
- *   /claude stop <session-id>                      — stop a session
- *   /claude auth <api-key>                         — register Anthropic API key (DM only)
- *   /claude whoami                                 — show auth status
- *   /claude revoke                                 — delete stored API key
- *   /claude help                                   — usage help
+ *   /claude start <project-dir> [description...]       — start a new session
+ *   /claude list                                        — list active sessions
+ *   /claude stop <session-id>                           — stop a session
+ *   /claude auth <api-key>                              — register Anthropic API key (DM only)
+ *   /claude whoami                                      — show auth status
+ *   /claude revoke                                      — delete stored API key
+ *   /claude register <server> <username> <password>     — register server credentials (DM only)
+ *   /claude servers                                     — list configured servers
+ *   /claude unregister <server>                         — remove server credentials
+ *   /claude help                                        — usage help
  */
 
 import type { App, RespondFn, RespondArguments } from '@slack/bolt';
@@ -26,8 +29,22 @@ import {
   isAppError,
 } from '../../utils/errors.js';
 import { SessionStatus } from '../../sessions/session-types.js';
-import { handleAuth, handleWhoami, handleRevoke, handleRegister } from './auth.js';
+import {
+  handleAuth,
+  handleWhoami,
+  handleRevoke,
+  handleServerRegister,
+  handleServerList,
+  handleServerUnregister,
+} from './auth.js';
 import { handleToken, handleLogout } from './login.js';
+import { getServerRegistry } from '../../servers/server-registry.js';
+import { UserStore } from '../../db/queries/users.js';
+import { getDatabase } from '../../db/database.js';
+
+function getUserStore(): UserStore {
+  return new UserStore(getDatabase());
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,9 +85,14 @@ const HELP_TEXT = [
   '`/claude auth <api-key>`',
   '  Register your Anthropic API key (DM only).',
   '',
-  '`/claude register <os-username>`',
-  '  Link your Slack account to a server OS username (DM only).',
-  '  Use this if you have a Claude Pro/Max subscription via `claude login`.',
+  '`/claude register <server> <username> <password>`',
+  '  Register your credentials for a configured server (DM only).',
+  '',
+  '`/claude servers`',
+  '  List all configured servers and your registration status.',
+  '',
+  '`/claude unregister <server>`',
+  '  Remove your stored credentials for a server.',
   '',
   '`/claude whoami`',
   '  Show your current auth status.',
@@ -151,8 +173,26 @@ export function registerClaudeCommand(app: App, sessionManager: SessionManager):
         }
 
         case 'register': {
-          const osUsername = args[0] ?? '';
-          const msg = await handleRegister(userId, osUsername, isDM);
+          if (args.length < 3) {
+            await respond(ephemeral('Usage: `/claude register <server> <username> <password>`'));
+            break;
+          }
+          const [serverName, username, ...passwordParts] = args;
+          const password = passwordParts.join(' ');
+          const msg = await handleServerRegister(userId, serverName, username, password, isDM);
+          await respond(ephemeral(msg));
+          break;
+        }
+
+        case 'servers': {
+          const msg = await handleServerList(userId);
+          await respond(ephemeral(msg));
+          break;
+        }
+
+        case 'unregister': {
+          const serverName = args[0] ?? '';
+          const msg = await handleServerUnregister(userId, serverName);
           await respond(ephemeral(msg));
           break;
         }
@@ -203,18 +243,74 @@ async function handleStart({
   client,
   sessionManager,
 }: StartContext): Promise<void> {
-  const projectDir = args[0];
-  if (!projectDir) {
+  if (!args[0]) {
     await respond(ephemeral('Usage: `/claude start <project-dir> [description...]`'));
     return;
   }
 
-  const description = args.slice(1).join(' ') || undefined;
+  // Parse server:path or server path syntax
+  let serverName: string | undefined;
+  let projectDir: string;
+
+  if (args[0].includes(':') && !args[0].startsWith('/')) {
+    // Syntax: felab2:/home/user/project
+    const colonIdx = args[0].indexOf(':');
+    serverName = args[0].substring(0, colonIdx);
+    projectDir = args[0].substring(colonIdx + 1);
+  } else {
+    // Check if first arg is a known server name
+    const registry = getServerRegistry();
+    const maybeServer = registry.resolve(args[0]);
+    if (maybeServer && args.length >= 2) {
+      // Syntax: felab2 /home/user/project
+      serverName = args[0];
+      projectDir = args[1];
+    } else {
+      // Syntax: /home/user/project (local, backward compatible)
+      projectDir = args[0];
+    }
+  }
+
+  if (serverName) {
+    const registry = getServerRegistry();
+    const server = registry.resolve(serverName);
+    if (!server) {
+      const available = registry.list().map(s => s.name).join(', ');
+      await respond(ephemeral(`Unknown server \`${serverName}\`. Available: ${available}`));
+      return;
+    }
+
+    if (!registry.isLocal(serverName)) {
+      // Check user has registered credentials for this server
+      const mapping = getUserStore().getServerMapping(userId, serverName);
+      if (!mapping) {
+        await respond(ephemeral(`You have not registered for server \`${serverName}\`. Use \`/claude register ${serverName} <username> <password>\` first.`));
+        return;
+      }
+    }
+  }
+
+  const registry = getServerRegistry();
+  const serverLabel = serverName && !registry.isLocal(serverName) ? ` [${serverName}]` : '';
+
+  // Description starts after the server+path arguments that were consumed
+  // "server path desc..." → args[0]=server, args[1]=path, args[2..]=desc
+  // "server:path desc..." → args[0]=server:path, args[1..]=desc
+  // "/path desc..."       → args[0]=path, args[1..]=desc
+  const descriptionStartIdx = (serverName && args.length >= 2 && !args[0].includes(':')) ? 2 : 1;
+  const description = args.slice(descriptionStartIdx).join(' ') || undefined;
+
+  // Auto-join the channel so the bot can receive thread messages
+  try {
+    await client.conversations.join({ channel: channelId });
+  } catch {
+    // Already a member or DM — ignore
+  }
 
   // Create the thread first so we have a threadTs for the session
   const threadMsg = await client.chat.postMessage({
     channel: channelId,
-    text: `:hourglass_flowing_sand: Starting Claude session for \`${projectDir}\`…`,
+    text: `:hourglass_flowing_sand: Starting Claude session for \`${projectDir}\`${serverLabel}…`,
   });
   const threadTs = threadMsg.ts!;
 
@@ -239,15 +335,21 @@ async function handleStart({
       threadTs,
       projectDir,
       onMessage,
-      onEnd: async (sessionId, reason) => {
-        logger.info('Session ended', { sessionId, reason });
+      onEnd: async (sessionId, reason, errorMessage) => {
+        logger.info('Session ended', { sessionId, reason, errorMessage });
         try {
+          let text: string;
+          if (reason === 'error') {
+            text = errorMessage
+              ? `:x: Session error: ${errorMessage}`
+              : `:x: Session ended due to an error.`;
+          } else {
+            text = `:white_check_mark: Session ended (${reason}).`;
+          }
           await client.chat.postMessage({
             channel: channelId,
             thread_ts: threadTs,
-            text: reason === 'error'
-              ? `:x: Session ended due to an error.`
-              : `:white_check_mark: Session ended (${reason}).`,
+            text,
           });
         } catch (err) {
           logger.warn('Failed to post session-end message', { sessionId, err });
@@ -270,6 +372,7 @@ async function handleStart({
         channelId,
         messageCount: 0,
         totalCost: 0,
+        serverName: info.serverName,
       }),
     });
 
@@ -311,6 +414,7 @@ async function handleList({ userId, respond, sessionManager }: ListContext): Pro
     channelId: s.channelId,
     messageCount: s.turnCount,
     totalCost: s.totalCostUsd,
+    serverName: s.serverName,
   }));
 
   await respond(ephemeral(

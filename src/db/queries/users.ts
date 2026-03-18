@@ -1,6 +1,8 @@
 import type { Database } from '../database.js';
 import { persistDb } from '../database.js';
 import type { EncryptedData } from '../../utils/crypto.js';
+import { decrypt } from '../../utils/crypto.js';
+import { config } from '../../config.js';
 
 export interface UserApiKeyRow {
   encrypted_api_key: string;
@@ -171,5 +173,59 @@ export class UserStore {
       [slackUserId],
     );
     persistDb(this.db);
+  }
+
+  saveServerMapping(slackUserId: string, serverName: string, osUsername: string, encryptedData: EncryptedData): void {
+    this.db.run(
+      `INSERT INTO user_server_mappings (slack_user_id, server_name, os_username, encrypted_password, password_iv, password_auth_tag)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(slack_user_id, server_name) DO UPDATE SET
+         os_username = excluded.os_username,
+         encrypted_password = excluded.encrypted_password,
+         password_iv = excluded.password_iv,
+         password_auth_tag = excluded.password_auth_tag`,
+      [slackUserId, serverName, osUsername, encryptedData.encrypted, encryptedData.iv, encryptedData.authTag],
+    );
+    persistDb(this.db);
+  }
+
+  getServerMapping(slackUserId: string, serverName: string): { osUsername: string; password: string } | null {
+    const result = this.db.exec(
+      `SELECT os_username, encrypted_password, password_iv, password_auth_tag FROM user_server_mappings WHERE slack_user_id = ? AND server_name = ?`,
+      [slackUserId, serverName],
+    );
+    if (!result.length || !result[0].values.length) return null;
+    const row = result[0].values[0];
+    if (!row[1]) return null;
+    const password = decrypt(
+      { encrypted: row[1] as string, iv: row[2] as string, authTag: row[3] as string },
+      config.ENCRYPTION_KEY,
+    );
+    return { osUsername: row[0] as string, password };
+  }
+
+  listServerMappings(slackUserId: string): Array<{ serverName: string; osUsername: string }> {
+    const result = this.db.exec(
+      `SELECT server_name, os_username FROM user_server_mappings WHERE slack_user_id = ? ORDER BY server_name`,
+      [slackUserId],
+    );
+    if (!result.length || !result[0].values.length) return [];
+    return result[0].values.map((row: unknown[]) => ({
+      serverName: row[0] as string,
+      osUsername: row[1] as string,
+    }));
+  }
+
+  deleteServerMapping(slackUserId: string, serverName: string): boolean {
+    this.db.run(
+      `DELETE FROM user_server_mappings WHERE slack_user_id = ? AND server_name = ?`,
+      [slackUserId, serverName],
+    );
+    persistDb(this.db);
+    const result = this.db.exec(
+      `SELECT 1 FROM user_server_mappings WHERE slack_user_id = ? AND server_name = ?`,
+      [slackUserId, serverName],
+    );
+    return !(result.length > 0 && result[0].values.length > 0);
   }
 }

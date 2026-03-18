@@ -12,6 +12,7 @@ export interface SessionSummary {
   channelId?: string;
   messageCount?: number;
   totalCost?: number;
+  serverName?: string;
 }
 
 export interface ProgressStatus {
@@ -110,13 +111,14 @@ export function sessionListBlocks(sessions: SessionSummary[]): KnownBlock[] {
     const cost = formatCost(s.totalCost);
 
     blocks.push(divider);
+    const serverTag = s.serverName && s.serverName !== 'local' ? ` [${s.serverName}]` : '';
     blocks.push({
       type: 'section',
       text: {
         type: 'mrkdwn',
         text:
           `${emoji} *\`${s.id}\`*  ${s.status}\n` +
-          `*Project:* \`${s.projectDir}\`` +
+          `*Project:* \`${s.projectDir}\`${serverTag}` +
           (s.description ? `  —  ${s.description}` : ''),
       },
       accessory: {

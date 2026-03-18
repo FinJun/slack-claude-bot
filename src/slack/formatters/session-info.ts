@@ -67,8 +67,9 @@ export function formatSessionList(sessions: SessionSummary[]): KnownBlock[] {
  */
 export function threadHeaderText(session: SessionSummary): string {
   const desc = session.description ? `\n*Description:* ${session.description}` : '';
+  const serverSuffix = session.serverName && session.serverName !== 'local' ? ` [${session.serverName}]` : '';
   return (
-    `:robot_face: *Claude Code Session Started*\n` +
+    `:robot_face: *Claude Code Session Started${serverSuffix}*\n` +
     `*Project:* \`${session.projectDir}\`${desc}\n` +
     `*Session ID:* \`${session.id}\`\n` +
     `_Reply in this thread to send messages to Claude._`

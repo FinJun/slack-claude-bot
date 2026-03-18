@@ -65,6 +65,10 @@ const envSchema = z.object({
 
   // Logging
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+
+  // Server registry
+  SERVERS: z.string().optional().default(''),
+  SSH_KEY_PATH: z.string().optional().default(''),
 });
 
 export type Config = z.infer<typeof envSchema>;

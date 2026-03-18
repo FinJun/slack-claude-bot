@@ -7,22 +7,22 @@
  *   3. Call pushMessage() to inject user turns
  *   4. Call stop() / interrupt() to end
  *
- * The SDK query() runs as a long-lived async generator. New user messages
- * are fed through a MessageQueue → AsyncIterable<SDKUserMessage>.
+ * The session delegates to a ClaudeTransport for communicating with Claude.
+ * By default a LocalTransport is created (wrapping the SDK query()), but
+ * callers may inject any ClaudeTransport (e.g. SshTransport) via options.
  */
 
 import { randomUUID } from 'crypto';
-import type { Query } from '@anthropic-ai/claude-code';
 import { SessionStatus } from './session-types.js';
 import type { SessionInfo } from './session-types.js';
-import { MessageQueue, createMessageStream } from './message-stream.js';
 import { SessionStateMachine } from './session-lifecycle.js';
-import { createStreamingSession } from '../claude/streaming-client.js';
 import { handleSDKMessage } from '../claude/message-handler.js';
 import { formatForSlack } from '../claude/response-formatter.js';
 import { createCanUseTool, defaultSandboxConfig } from '../security/sandbox-config.js';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+import type { ClaudeTransport } from '../ssh/types.js';
+import { LocalTransport } from '../ssh/local-transport.js';
 import type { Options } from '@anthropic-ai/claude-code';
 
 export interface SlackSessionOptions {
@@ -32,8 +32,8 @@ export interface SlackSessionOptions {
   projectDir: string;
   /** Called with formatted Slack text chunks as Claude responds */
   onMessage: (sessionId: string, chunks: string[]) => Promise<void>;
-  /** Called when the session ends (any reason) */
-  onEnd?: (sessionId: string, reason: 'stop' | 'error' | 'timeout') => void;
+  /** Called when the session ends (any reason). errorMessage is set when reason === 'error'. */
+  onEnd?: (sessionId: string, reason: 'stop' | 'error' | 'timeout', errorMessage?: string) => void;
   /** Permission mode override */
   permissionMode?: Options['permissionMode'];
   /** Resume a previous SDK session */
@@ -42,16 +42,18 @@ export interface SlackSessionOptions {
   env?: Record<string, string>;
   /** Claude model override (e.g. 'claude-opus-4-6') */
   model?: string;
+  /** Optional pre-built transport — if omitted, a LocalTransport is created in start() */
+  transport?: ClaudeTransport;
+  /** Server name this session is running on (undefined or 'local' for local sessions) */
+  serverName?: string;
 }
 
 export class SlackSession {
   readonly id: string;
   private sdkSessionId: string | null = null;
 
-  private readonly queue: MessageQueue;
-  private readonly abortController: AbortController;
   private readonly stateMachine: SessionStateMachine;
-  private query: Query | null = null;
+  private transport: ClaudeTransport | null = null;
   private loopPromise: Promise<void> | null = null;
 
   private createdAt: Date;
@@ -61,8 +63,6 @@ export class SlackSession {
 
   constructor(private readonly opts: SlackSessionOptions) {
     this.id = randomUUID();
-    this.queue = new MessageQueue();
-    this.abortController = new AbortController();
     this.createdAt = new Date();
     this.lastActivityAt = new Date();
 
@@ -96,6 +96,7 @@ export class SlackSession {
       turnCount: this.turnCount,
       totalCostUsd: this.totalCostUsd,
       workingDirectory: this.opts.projectDir,
+      serverName: this.opts.serverName,
     };
   }
 
@@ -105,7 +106,7 @@ export class SlackSession {
   pushMessage(content: string): void {
     this.lastActivityAt = new Date();
     this.stateMachine.transition('message_received');
-    this.queue.pushMessage(content, this.sdkSessionId ?? '');
+    this.transport?.sendMessage(content, this.sdkSessionId ?? '');
   }
 
   /**
@@ -114,26 +115,25 @@ export class SlackSession {
   start(): void {
     if (this.loopPromise) return;
 
-    const signal = this.abortController.signal;
-    const msgStream = createMessageStream(this.queue, signal);
+    if (this.opts.transport) {
+      this.transport = this.opts.transport;
+    } else {
+      const sandboxCfg = defaultSandboxConfig(this.opts.projectDir);
+      const canUseTool = createCanUseTool(sandboxCfg);
 
-    const sandboxCfg = defaultSandboxConfig(this.opts.projectDir);
-    const canUseTool = createCanUseTool(sandboxCfg);
-
-    this.query = createStreamingSession({
-      prompt: msgStream,
-      resumeSessionId: this.opts.resumeSdkSessionId,
-      permissionMode: this.opts.permissionMode ?? 'default',
-      canUseTool,
-      cwd: this.opts.projectDir,
-      maxTurns: config.MAX_TURNS,
-      abortController: this.abortController,
-      includePartialMessages: false,
-      additionalDirectories: config.ALLOWED_DIRECTORIES,
-      env: this.opts.env,
-      model: this.opts.model ?? 'claude-opus-4-6',
-      appendSystemPrompt: 'You are a helpful AI assistant running in a Slack workspace. You can answer general questions, have casual conversations, AND help with software engineering tasks. Do not refuse non-coding questions - be helpful for any topic the user asks about.',
-    });
+      this.transport = new LocalTransport({
+        cwd: this.opts.projectDir,
+        maxTurns: config.MAX_TURNS,
+        resumeSessionId: this.opts.resumeSdkSessionId,
+        permissionMode: this.opts.permissionMode ?? 'default',
+        canUseTool,
+        additionalDirectories: config.ALLOWED_DIRECTORIES,
+        env: this.opts.env,
+        model: this.opts.model ?? 'claude-opus-4-6',
+        appendSystemPrompt: 'You are a helpful AI assistant running in a Slack workspace. You can answer general questions, have casual conversations, AND help with software engineering tasks. Do not refuse non-coding questions - be helpful for any topic the user asks about.',
+        includePartialMessages: false,
+      });
+    }
 
     this.loopPromise = this.runLoop();
   }
@@ -143,9 +143,9 @@ export class SlackSession {
    * Does not close the session.
    */
   async interrupt(): Promise<void> {
-    if (this.query) {
+    if (this.transport) {
       try {
-        await this.query.interrupt();
+        await this.transport.interrupt();
       } catch (err) {
         logger.warn('interrupt() failed', { sessionId: this.id, err });
       }
@@ -157,8 +157,10 @@ export class SlackSession {
    */
   stop(): void {
     this.stateMachine.transition('stop_requested');
-    this.queue.close();
-    this.abortController.abort();
+    if (this.transport) {
+      this.transport.close();
+      this.transport.abort();
+    }
     this.stateMachine.destroy();
   }
 
@@ -167,9 +169,7 @@ export class SlackSession {
     log.info('Session loop starting');
 
     try {
-      for await (const message of this.query!) {
-        if (this.abortController.signal.aborted) break;
-
+      for await (const message of this.transport!.messages) {
         // Extract SDK session ID from the first system init message
         if (message.type === 'system' && message.subtype === 'init') {
           this.sdkSessionId = message.session_id;
@@ -203,15 +203,22 @@ export class SlackSession {
 
       log.info('Session loop ended normally');
     } catch (err) {
-      if (this.abortController.signal.aborted) {
-        log.info('Session loop aborted');
-      } else {
-        log.error('Session loop error', { err });
-        this.stateMachine.transition('error_occurred');
-        this.opts.onEnd?.(this.id, 'error');
+      if (this.transport) {
+        // Check if we were aborted — transport doesn't expose signal directly,
+        // so we check the session status instead
+        if (this.status === SessionStatus.TERMINATED) {
+          log.info('Session loop aborted');
+        } else {
+          log.error('Session loop error', { err });
+          this.stateMachine.transition('error_occurred');
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          this.opts.onEnd?.(this.id, 'error', errorMessage);
+        }
       }
     } finally {
-      this.queue.close();
+      if (this.transport) {
+        this.transport.close();
+      }
       this.stateMachine.destroy();
     }
   }

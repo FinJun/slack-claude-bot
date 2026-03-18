@@ -31,6 +31,7 @@ vi.mock('fs', () => ({
 import { existsSync } from 'fs';
 import { initDatabase, closeDatabase } from '../../src/db/database.js';
 import { migration001 } from '../../src/db/migrations/001-initial.js';
+import { migration007 } from '../../src/db/migrations/007-sessions-server.js';
 import { SessionStore } from '../../src/db/queries/sessions.js';
 import { logToolUse, getRecentDenials } from '../../src/db/queries/audit.js';
 
@@ -39,7 +40,7 @@ const mockedExistsSync = vi.mocked(existsSync);
 describe('SQLite session store', () => {
   beforeEach(async () => {
     mockedExistsSync.mockReturnValue(false);
-    await initDatabase([migration001]);
+    await initDatabase([migration001, migration007]);
   });
 
   afterEach(() => {
