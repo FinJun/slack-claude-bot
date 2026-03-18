@@ -65,7 +65,7 @@ export async function handleLogin(
         ...process.env,
         CLAUDE_CONFIG_DIR: configDir,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
 
     const settle = (msg: string): void => {
