@@ -233,6 +233,60 @@ export async function handleServerList(slackUserId: string): Promise<string> {
 }
 
 /**
+ * Handle `/claude addserver <name> <host> [port]`.
+ * Adds a new server to the registry and persists to .env.
+ */
+export async function handleAddServer(
+  serverName: string,
+  host: string,
+  port: string,
+): Promise<string> {
+  if (!serverName || !host) {
+    return 'Usage: `/claude addserver <name> <host> [port]`';
+  }
+
+  const registry = getServerRegistry();
+  if (registry.resolve(serverName)) {
+    return `❌ Server \`${serverName}\` already exists.`;
+  }
+
+  const portNum = parseInt(port, 10);
+  if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+    return `❌ Invalid port: \`${port}\`. Must be a number between 1 and 65535.`;
+  }
+
+  registry.addServer(serverName, host, portNum);
+  return `✅ Server \`${serverName}\` added (${host}:${portNum}).`;
+}
+
+/**
+ * Handle `/claude removeserver <name>`.
+ * Removes a server from the registry and persists to .env.
+ */
+export async function handleRemoveServer(serverName: string): Promise<string> {
+  if (!serverName) {
+    return 'Usage: `/claude removeserver <name>`';
+  }
+
+  const localHostname = (await import('os')).hostname();
+  const protected_ = new Set(['super', 'local', localHostname]);
+  if (protected_.has(serverName)) {
+    return `❌ Cannot remove protected server \`${serverName}\`.`;
+  }
+
+  const registry = getServerRegistry();
+  const removed = registry.removeServer(serverName);
+  if (!removed) {
+    const available = registry.list().map((s) => `\`${s.name}\``).join(', ');
+    return available
+      ? `❌ Unknown server \`${serverName}\`. Available servers: ${available}`
+      : `❌ Unknown server \`${serverName}\`. No servers are configured.`;
+  }
+
+  return `✅ Server \`${serverName}\` removed.`;
+}
+
+/**
  * Handle `/claude unregister <server>`.
  * Removes the user's server mapping.
  */

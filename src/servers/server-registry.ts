@@ -1,4 +1,6 @@
+import * as fs from 'fs';
 import * as os from 'os';
+import * as path from 'path';
 import { config } from '../config.js';
 
 export interface ServerConfig {
@@ -50,6 +52,39 @@ export class ServerRegistry {
       server.name === localHostname ||
       server.host === localHostname
     );
+  }
+
+  addServer(name: string, host: string, port: number = 22): void {
+    this.servers.set(name, { name, host, port });
+    this.persistToEnv();
+  }
+
+  removeServer(name: string): boolean {
+    const existed = this.servers.has(name);
+    if (existed) {
+      this.servers.delete(name);
+      this.persistToEnv();
+    }
+    return existed;
+  }
+
+  private persistToEnv(): void {
+    const envPath = path.join(process.cwd(), '.env');
+    const newLine = `SERVERS=${Array.from(this.servers.values()).map(s => `${s.name}:${s.host}:${s.port}`).join(',')}`;
+
+    let lines: string[] = [];
+    if (fs.existsSync(envPath)) {
+      lines = fs.readFileSync(envPath, 'utf8').split('\n');
+    }
+
+    const idx = lines.findIndex(l => l.startsWith('SERVERS='));
+    if (idx >= 0) {
+      lines[idx] = newLine;
+    } else {
+      lines.push(newLine);
+    }
+
+    fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
   }
 }
 

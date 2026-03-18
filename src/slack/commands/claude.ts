@@ -36,6 +36,8 @@ import {
   handleServerRegister,
   handleServerList,
   handleServerUnregister,
+  handleAddServer,
+  handleRemoveServer,
 } from './auth.js';
 import { handleToken, handleLogout } from './login.js';
 import { getServerRegistry } from '../../servers/server-registry.js';
@@ -93,6 +95,12 @@ const HELP_TEXT = [
   '',
   '`/claude unregister <server>`',
   '  Remove your stored credentials for a server.',
+  '',
+  '`/claude addserver <name> <host> [port]`',
+  '  Add a new server to the bot configuration (persisted to .env).',
+  '',
+  '`/claude removeserver <name>`',
+  '  Remove a server from the bot configuration (persisted to .env).',
   '',
   '`/claude whoami`',
   '  Show your current auth status.',
@@ -193,6 +201,28 @@ export function registerClaudeCommand(app: App, sessionManager: SessionManager):
         case 'unregister': {
           const serverName = args[0] ?? '';
           const msg = await handleServerUnregister(userId, serverName);
+          await respond(ephemeral(msg));
+          break;
+        }
+
+        case 'addserver': {
+          if (args.length < 2) {
+            await respond(ephemeral('Usage: `/claude addserver <name> <host> [port]`'));
+            break;
+          }
+          const [name, host] = args;
+          const port = args[2] || '22';
+          const msg = await handleAddServer(name, host, port);
+          await respond(ephemeral(msg));
+          break;
+        }
+
+        case 'removeserver': {
+          if (!args[0]) {
+            await respond(ephemeral('Usage: `/claude removeserver <name>`'));
+            break;
+          }
+          const msg = await handleRemoveServer(args[0]);
           await respond(ephemeral(msg));
           break;
         }
