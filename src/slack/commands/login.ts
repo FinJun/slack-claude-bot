@@ -6,7 +6,7 @@
  * DM only — never expose auth URLs in channels.
  */
 
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { UserStore } from '../../db/queries/users.js';
@@ -19,8 +19,8 @@ import type { SessionManager } from '../types.js';
 const CONFIG_BASE_DIR = resolve(process.cwd(), 'data/claude-configs');
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
-// Pattern to extract the OAuth URL from claude auth login output
-const URL_PATTERN = /https:\/\/claude\.ai\/oauth\/authorize\S+/;
+// Broad URL pattern — capture any https URL in the output
+const URL_PATTERN = /https:\/\/\S+/;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -30,6 +30,14 @@ function getUserStore(): UserStore {
 
 function configDirForUser(slackUserId: string): string {
   return resolve(CONFIG_BASE_DIR, slackUserId);
+}
+
+function findClaude(): string {
+  try {
+    return execSync('which claude', { encoding: 'utf-8' }).trim();
+  } catch {
+    return 'claude'; // fallback, let spawn handle the error
+  }
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -51,16 +59,19 @@ export async function handleLogin(
   }
 
   const configDir = configDirForUser(slackUserId);
+  const claudePath = findClaude();
+
+  logger.info('Starting claude login', { slackUserId, claudePath, configDir });
 
   // Ensure the config directory exists
   mkdirSync(configDir, { recursive: true });
 
-  return new Promise<string>((resolve) => {
+  return new Promise<string>((resolvePromise) => {
     let urlSent = false;
     let settled = false;
     let output = '';
 
-    const child = spawn('claude', ['auth', 'login'], {
+    const child = spawn(claudePath, ['auth', 'login'], {
       env: {
         ...process.env,
         CLAUDE_CONFIG_DIR: configDir,
@@ -72,30 +83,33 @@ export async function handleLogin(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(msg);
+      resolvePromise(msg);
     };
 
     // 5-minute hard timeout
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
+      logger.warn('Login timed out', { slackUserId, output });
       settle('⏱️ 로그인 시간이 초과되었습니다 (5분). 다시 `/claude login`을 시도해 주세요.');
     }, LOGIN_TIMEOUT_MS);
 
     const onData = (chunk: Buffer): void => {
       const text = chunk.toString();
       output += text;
+      logger.debug('claude auth login output', { slackUserId, text: text.trim() });
 
       if (!urlSent) {
         const match = URL_PATTERN.exec(output);
         if (match) {
           urlSent = true;
           const url = match[0];
-          logger.info('Captured claude auth login URL', { slackUserId });
-          // Send URL to user asynchronously — do not block
+          logger.info('Captured login URL', { slackUserId, url: url.substring(0, 50) + '...' });
           sendDM(
             `🔗 아래 링크를 브라우저에서 열어 Claude 계정으로 로그인하세요:\n${url}`,
-          ).catch((err) => {
-            logger.warn('Failed to send login URL via DM', { slackUserId, err });
+          ).then(() => {
+            logger.info('Login URL sent via DM', { slackUserId });
+          }).catch((err) => {
+            logger.error('Failed to send login URL via DM', { slackUserId, err: String(err) });
           });
         }
       }
@@ -105,13 +119,14 @@ export async function handleLogin(
     child.stderr.on('data', onData);
 
     child.on('error', (err) => {
-      logger.error('claude auth login process error', { slackUserId, err });
-      settle(`❌ 로그인 프로세스 오류: ${err.message}`);
+      logger.error('claude auth login spawn error', { slackUserId, err: String(err) });
+      settle(`❌ claude 명령을 실행할 수 없습니다: ${err.message}\nclaude CLI가 설치되어 있는지 확인하세요.`);
     });
 
     child.on('close', (code) => {
+      logger.info('claude auth login exited', { slackUserId, code, output: output.substring(0, 200) });
+
       if (code === 0) {
-        // Save config dir to DB
         try {
           getUserStore().saveConfigDir(slackUserId, configDir);
           logger.info('Saved config_dir for user', { slackUserId, configDir });
@@ -128,7 +143,8 @@ export async function handleLogin(
         } catch {
           // best-effort cleanup
         }
-        settle(`❌ 로그인 실패 (exit code ${code ?? 'unknown'}). 다시 시도해 주세요.`);
+        const detail = output ? `\n출력: ${output.substring(0, 200)}` : '';
+        settle(`❌ 로그인 실패 (exit code ${code ?? 'unknown'}).${detail}\n다시 시도해 주세요.`);
       }
     });
   });
