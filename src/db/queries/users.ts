@@ -53,4 +53,34 @@ export class UserStore {
     );
     return result.length > 0 && result[0].values.length > 0;
   }
+
+  saveOsUsername(slackUserId: string, osUsername: string): void {
+    this.db.run(
+      `INSERT INTO users (slack_user_id, os_username, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT(slack_user_id) DO UPDATE SET
+         os_username = excluded.os_username,
+         updated_at = datetime('now')`,
+      [slackUserId, osUsername],
+    );
+    persistDb(this.db);
+  }
+
+  getOsUsername(slackUserId: string): string | null {
+    const result = this.db.exec(
+      `SELECT os_username FROM users WHERE slack_user_id = ?`,
+      [slackUserId],
+    );
+    if (!result.length || !result[0].values.length) return null;
+    const val = result[0].values[0][0];
+    return typeof val === 'string' ? val : null;
+  }
+
+  hasOsUsername(slackUserId: string): boolean {
+    const result = this.db.exec(
+      `SELECT 1 FROM users WHERE slack_user_id = ? AND os_username IS NOT NULL`,
+      [slackUserId],
+    );
+    return result.length > 0 && result[0].values.length > 0;
+  }
 }

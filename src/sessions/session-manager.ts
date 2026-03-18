@@ -73,13 +73,28 @@ export class SessionManager {
       apiKey = config.ANTHROPIC_API_KEY;
     }
 
+    // Resolve per-user HOME for Claude subscription auth (if no API key)
+    let sessionEnv: Record<string, string> | undefined;
+    if (apiKey) {
+      sessionEnv = { ANTHROPIC_API_KEY: apiKey };
+    } else {
+      const osUsername = this.userStore.getOsUsername(params.userId);
+      if (osUsername) {
+        sessionEnv = { HOME: `/home/${osUsername}` };
+        logger.info('Using OS user HOME for Claude auth', {
+          userId: params.userId,
+          osUsername,
+        });
+      }
+    }
+
     const session = new SlackSession({
       userId: params.userId,
       channelId: params.channelId,
       threadTs: params.threadTs,
       projectDir: params.projectDir,
       onMessage: params.onMessage,
-      apiKey,
+      env: sessionEnv,
       onEnd: (sessionId, reason) => {
         params.onEnd?.(sessionId, reason);
         this.handleSessionEnd(sessionId, reason);

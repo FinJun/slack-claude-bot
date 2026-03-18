@@ -2,6 +2,7 @@ export { initDatabase, getDatabase, closeDatabase, persistDb } from './database.
 export type { Database, Migration } from './database.js';
 export { migration001 } from './migrations/001-initial.js';
 export { migration002 } from './migrations/002-users.js';
+export { migration003 } from './migrations/003-users-os-username.js';
 export { SessionStore } from './queries/sessions.js';
 export type { Session, CreateSessionParams, UpdateSessionParams, SessionStatus } from './queries/sessions.js';
 export { logToolUse, getRecentDenials, getAuditLogsForSession } from './queries/audit.js';

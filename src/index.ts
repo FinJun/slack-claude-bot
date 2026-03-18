@@ -12,7 +12,7 @@
 
 import 'dotenv/config';
 import { config } from './config.js';
-import { initDatabase, closeDatabase, migration001, migration002 } from './db/index.js';
+import { initDatabase, closeDatabase, migration001, migration002, migration003 } from './db/index.js';
 import { UserStore } from './db/queries/users.js';
 import { SessionManager } from './sessions/index.js';
 import { createApp } from './app.js';
@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   logger.info('Starting slack-claude-bot', { version: '0.1.0' });
 
   // ── 1. Database ──────────────────────────────────────────────────────────
-  const db = await initDatabase([migration001, migration002]);
+  const db = await initDatabase([migration001, migration002, migration003]);
   logger.info('Database initialised');
 
   // ── 2. Session manager ───────────────────────────────────────────────────

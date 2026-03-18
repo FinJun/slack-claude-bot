@@ -38,8 +38,8 @@ export interface SlackSessionOptions {
   permissionMode?: Options['permissionMode'];
   /** Resume a previous SDK session */
   resumeSdkSessionId?: string;
-  /** User's decrypted Anthropic API key — injected as env for this session only */
-  apiKey?: string;
+  /** Environment variables to inject into the Claude subprocess (e.g. ANTHROPIC_API_KEY or HOME) */
+  env?: Record<string, string>;
 }
 
 export class SlackSession {
@@ -128,7 +128,7 @@ export class SlackSession {
       abortController: this.abortController,
       includePartialMessages: false,
       additionalDirectories: config.ALLOWED_DIRECTORIES,
-      env: this.opts.apiKey ? { ANTHROPIC_API_KEY: this.opts.apiKey } : undefined,
+      env: this.opts.env,
     });
 
     this.loopPromise = this.runLoop();

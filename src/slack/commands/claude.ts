@@ -26,7 +26,7 @@ import {
   isAppError,
 } from '../../utils/errors.js';
 import { SessionStatus } from '../../sessions/session-types.js';
-import { handleAuth, handleWhoami, handleRevoke } from './auth.js';
+import { handleAuth, handleWhoami, handleRevoke, handleRegister } from './auth.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -59,6 +59,10 @@ const HELP_TEXT = [
   '',
   '`/claude auth <api-key>`',
   '  Register your Anthropic API key (DM only).',
+  '',
+  '`/claude register <os-username>`',
+  '  Link your Slack account to a server OS username (DM only).',
+  '  Use this if you have a Claude Pro/Max subscription via `claude login`.',
   '',
   '`/claude whoami`',
   '  Show your current auth status.',
@@ -106,6 +110,13 @@ export function registerClaudeCommand(app: App, sessionManager: SessionManager):
         case 'auth': {
           const apiKey = args[0] ?? '';
           const msg = await handleAuth(userId, apiKey, isDM);
+          await respond(ephemeral(msg));
+          break;
+        }
+
+        case 'register': {
+          const osUsername = args[0] ?? '';
+          const msg = await handleRegister(userId, osUsername, isDM);
           await respond(ephemeral(msg));
           break;
         }
